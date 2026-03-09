@@ -7,7 +7,9 @@ import traceback
 from pathlib import Path
 from shutil import disk_usage
 
+import boto3
 import requests
+from botocore.config import Config
 
 
 def run_media_probe() -> int:
@@ -168,10 +170,65 @@ def run_download_check_probe() -> int:
         return 1
 
 
+def run_bucket_bootstrap_probe() -> int:
+    try:
+        client = boto3.client(
+            "s3",
+            endpoint_url=os.getenv("S3_ENDPOINT", "http://minio:9000"),
+            region_name=os.getenv("S3_REGION", "us-east-1"),
+            aws_access_key_id=os.environ["S3_ACCESS_KEY_ID"],
+            aws_secret_access_key=os.environ["S3_SECRET_ACCESS_KEY"],
+            config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
+        )
+        buckets = [
+            os.getenv("S3_BUCKET_USER_VIDEOS", "user-videos"),
+            os.getenv("S3_BUCKET_TMP_UPLOADS", "tmp-uploads"),
+        ]
+        existing = {bucket["Name"] for bucket in client.list_buckets().get("Buckets", [])}
+        for bucket in buckets:
+            if bucket not in existing:
+                client.create_bucket(Bucket=bucket)
+        client.put_bucket_lifecycle_configuration(
+            Bucket=os.getenv("S3_BUCKET_TMP_UPLOADS", "tmp-uploads"),
+            LifecycleConfiguration={
+                "Rules": [
+                    {
+                        "ID": "expire-tmp-uploads-7d",
+                        "Status": "Enabled",
+                        "Filter": {"Prefix": ""},
+                        "Expiration": {"Days": 7},
+                    }
+                ]
+            },
+        )
+        result = {
+            "buckets": [bucket["Name"] for bucket in client.list_buckets()["Buckets"]],
+            "lifecycle_applied_to": os.getenv("S3_BUCKET_TMP_UPLOADS", "tmp-uploads"),
+        }
+        print(json.dumps(result))
+        sys.stdout.flush()
+        time.sleep(300)
+        return 0
+    except Exception as exc:
+        print(
+            json.dumps(
+                {
+                    "error": str(exc),
+                    "traceback": traceback.format_exc(),
+                }
+            )
+        )
+        sys.stdout.flush()
+        time.sleep(300)
+        return 1
+
+
 def main() -> int:
     mode = os.getenv("PROBE_MODE")
     if mode == "disk-check":
         return run_disk_probe()
+    if mode == "bucket-bootstrap":
+        return run_bucket_bootstrap_probe()
     if mode == "download-check":
         return run_download_check_probe()
     return run_media_probe()
