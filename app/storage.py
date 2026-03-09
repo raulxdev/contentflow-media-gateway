@@ -33,11 +33,11 @@ class StorageClient:
         )
         return self._rewrite_endpoint(url)
 
-    def generate_download_url(self, bucket: str, object_key: str) -> str:
+    def generate_download_url(self, bucket: str, object_key: str, expires_in: int | None = None) -> str:
         url = self._client.generate_presigned_url(
             "get_object",
             Params={"Bucket": bucket, "Key": object_key},
-            ExpiresIn=self.settings.presigned_download_ttl_sec,
+            ExpiresIn=expires_in or self.settings.presigned_download_ttl_sec,
         )
         return self._rewrite_endpoint(url)
 
@@ -57,6 +57,9 @@ class StorageClient:
 
     def upload_object(self, bucket: str, object_key: str, body: bytes, mime_type: str) -> None:
         self._client.put_object(Bucket=bucket, Key=object_key, Body=body, ContentType=mime_type)
+
+    def get_object(self, bucket: str, object_key: str):
+        return self._client.get_object(Bucket=bucket, Key=object_key)
 
     def _rewrite_endpoint(self, url: str) -> str:
         if not self.settings.s3_public_endpoint:

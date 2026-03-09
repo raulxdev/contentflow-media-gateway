@@ -11,6 +11,7 @@ Estos ejemplos se pueden pegar en `Import from cURL` de un nodo `HTTP Request`, 
 - Bucket persistente: `user-videos`
 - Bucket temporal: `tmp-uploads`
 - Las URLs devueltas son internas, no para compartir con usuarios externos
+- Si lo pides al subir, tambien puedes obtener una `publicUrl` temporal compartible
 
 ## Cuando usar cada bucket
 
@@ -76,11 +77,33 @@ Si la compartes fuera de la red interna:
 - el host `minio` no va a resolver
 - el usuario final no podra descargar el archivo
 
+## URLs publicas temporales
+
+Si en el upload envias:
+
+- `makePublic=true`
+
+y opcionalmente:
+
+- `publicTtlSec=3600`
+
+entonces la respuesta incluira:
+
+- `publicUrl`
+- `publicExpiresAt`
+
+La `publicUrl` si se puede compartir externamente y sera servida por:
+
+- `https://media-share.aishiagency.tech/public/media/{token}`
+
+El gateway validara el token y entregara el archivo desde el endpoint publico.
+
 ## Flujo principal
 
 1. `POST /v1/media/upload`
 2. recibes `mediaId + downloadUrl + expiresIn`
 3. si otro microservicio interno necesita el archivo, puede usar esa URL o pedir otra con `GET /v1/media/{mediaId}/download-url`
+4. si el archivo es publico, tambien recibes `publicUrl`
 
 ## 1. Healthcheck
 
@@ -108,6 +131,18 @@ curl --request POST 'http://media-gateway:8000/v1/media/upload' \
   --form 'file=@"/data/video.mp4";type=video/mp4'
 ```
 
+## 3b. Upload de video con enlace publico temporal
+
+```bash
+curl --request POST 'http://media-gateway:8000/v1/media/upload' \
+  --header 'X-API-Key: REPLACE_ME_API_KEY' \
+  --form 'userId="user-123"' \
+  --form 'bucket="user-videos"' \
+  --form 'makePublic="true"' \
+  --form 'publicTtlSec="3600"' \
+  --form 'file=@"/data/video.mp4";type=video/mp4'
+```
+
 ## 4. Upload temporal
 
 ```bash
@@ -124,7 +159,9 @@ curl --request POST 'http://media-gateway:8000/v1/media/upload' \
 {
   "mediaId": "REPLACE_WITH_MEDIA_ID",
   "downloadUrl": "http://minio:9000/...",
-  "expiresIn": 900
+  "expiresIn": 900,
+  "publicUrl": "https://media-share.aishiagency.tech/public/media/...",
+  "publicExpiresAt": "2026-03-09T22:00:00+00:00"
 }
 ```
 
@@ -147,6 +184,13 @@ curl --request DELETE 'http://media-gateway:8000/v1/media/REPLACE_WITH_MEDIA_ID'
   --header 'X-API-Key: REPLACE_ME_API_KEY'
 ```
 
+## 8. Revocar enlace publico
+
+```bash
+curl --request POST 'http://media-gateway:8000/v1/media/REPLACE_WITH_MEDIA_ID/revoke-public' \
+  --header 'X-API-Key: REPLACE_ME_API_KEY'
+```
+
 ## Configuracion esperada en n8n
 
 - Metodo: `POST`
@@ -164,6 +208,7 @@ curl --request DELETE 'http://media-gateway:8000/v1/media/REPLACE_WITH_MEDIA_ID'
 - `REPLACE_ME_API_KEY`
 - `REPLACE_WITH_MEDIA_ID`
 - `REPLACE_WITH_DOWNLOAD_URL`
+- `REPLACE_WITH_PUBLIC_URL`
 - `userId`
 - `bucket`
 
@@ -194,3 +239,4 @@ curl --request DELETE 'http://media-gateway:8000/v1/media/REPLACE_WITH_MEDIA_ID'
 - `tmp-uploads` es temporal y caduca a los `3 dias`
 - `userId` organiza archivos dentro del bucket compartido, no crea un bucket por usuario
 - las URLs de descarga actuales son internas, no son enlaces para compartir con clientes o usuarios finales
+- la `publicUrl` solo aparece si el upload se hace con `makePublic=true`

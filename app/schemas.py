@@ -41,6 +41,12 @@ class UploadResponse(BaseModel):
     mediaId: str
     downloadUrl: str
     expiresIn: int
+    publicUrl: str | None = None
+    publicExpiresAt: str | None = None
+
+
+class ActionResponse(BaseModel):
+    ok: bool
 
 
 class DeleteResponse(BaseModel):

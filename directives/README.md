@@ -13,6 +13,8 @@ Guia operativa del almacenamiento interno del proyecto para n8n y microservicios
 - `GET /health`
 - `POST /v1/media/upload`
 - `GET /v1/media/{media_id}/download-url`
+- `GET /public/media/{token}`
+- `POST /v1/media/{media_id}/revoke-public`
 - `DELETE /v1/media/{media_id}`
 
 ## Buckets
@@ -79,6 +81,22 @@ Si envias una de esas URLs a un usuario final:
 
 - normalmente no va a resolver el host
 - o no podra descargar el archivo fuera del entorno interno
+
+## URLs publicas temporales
+
+Cuando un upload se hace con publicacion activa:
+
+- la respuesta incluye `publicUrl`
+- esa URL si es compartible externamente
+- usa el dominio publico `media-share.aishiagency.tech`
+- el gateway valida el token y sirve el archivo desde el endpoint publico
+
+Reglas:
+
+- solo aplica para `user-videos`
+- `tmp-uploads` no admite publicacion
+- la publicacion es temporal
+- puede revocarse con `POST /v1/media/{media_id}/revoke-public`
 
 ## Limites operativos
 

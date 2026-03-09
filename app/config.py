@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     allowed_extensions: str = Field(default=".jpg,.jpeg,.png,.webp,.mp4,.mov,.webm", alias="ALLOWED_EXTENSIONS")
     write_rate_limit_per_minute: int = Field(default=30, alias="WRITE_RATE_LIMIT_PER_MINUTE")
     database_url: str = Field(default="sqlite:////app/data/media.db", alias="DATABASE_URL")
+    public_base_url: str | None = Field(default=None, alias="PUBLIC_BASE_URL")
+    public_link_default_ttl_sec: int = Field(default=3600, alias="PUBLIC_LINK_DEFAULT_TTL_SEC")
+    public_link_max_ttl_sec: int = Field(default=604800, alias="PUBLIC_LINK_MAX_TTL_SEC")
 
     @property
     def allowed_mime_type_set(self) -> set[str]:

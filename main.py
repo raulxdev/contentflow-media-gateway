@@ -1,9 +1,11 @@
 import logging
 import mimetypes
-from datetime import datetime, timezone
+import secrets
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile, status
+from fastapi.responses import StreamingResponse
 from sqlmodel import Session, select
 
 from app.config import get_settings
@@ -13,6 +15,7 @@ from app.rate_limit import enforce_write_rate_limit
 from app.schemas import (
     CompleteUploadRequest,
     CompleteUploadResponse,
+    ActionResponse,
     DeleteResponse,
     DownloadUrlResponse,
     InitUploadRequest,
@@ -82,6 +85,33 @@ def infer_mime_type(upload: UploadFile) -> str:
     if guessed:
         return guessed.lower()
     return "application/octet-stream"
+
+
+def utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def build_public_url(token: str) -> str:
+    if not settings.public_base_url:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Public base URL is not configured")
+    return f"{settings.public_base_url.rstrip('/')}/public/media/{token}"
+
+
+def normalize_datetime(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def parse_public_ttl(public_ttl_sec: int | None) -> int:
+    ttl = public_ttl_sec or settings.public_link_default_ttl_sec
+    if ttl <= 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid public TTL")
+    if ttl > settings.public_link_max_ttl_sec:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Public TTL exceeds maximum")
+    return ttl
 
 
 @app.post("/v1/media/init-upload", response_model=InitUploadResponse, dependencies=[Depends(require_api_key)])
@@ -164,6 +194,8 @@ async def upload_media(
     request: Request,
     userId: str = Form(..., min_length=1, max_length=128),
     bucket: str = Form(..., min_length=1, max_length=64),
+    makePublic: bool = Form(default=False),
+    publicTtlSec: int | None = Form(default=None),
     file: UploadFile = File(...),
     session: Session = Depends(get_session),
     storage: StorageClient = Depends(get_storage_client),
@@ -175,6 +207,15 @@ async def upload_media(
     mime_type = infer_mime_type(file)
     bucket = normalize_bucket(bucket.strip())
     userId = userId.strip()
+    public_ttl_sec: int | None = None
+    public_token: str | None = None
+    public_expires_at: datetime | None = None
+    if makePublic:
+        if bucket != settings.s3_bucket_user_videos:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Public links are only allowed for user-videos")
+        public_ttl_sec = parse_public_ttl(publicTtlSec)
+        public_token = secrets.token_urlsafe(24)
+        public_expires_at = (utcnow() + timedelta(seconds=public_ttl_sec)).replace(microsecond=0)
     body = await file.read()
     size = len(body)
     validate_upload_metadata(file.filename, mime_type, size, bucket)
@@ -205,6 +246,9 @@ async def upload_media(
         mime_type=mime_type,
         size=size,
         status="ready",
+        is_public=makePublic,
+        public_token=public_token,
+        public_expires_at=public_expires_at,
     )
     session.add(record)
     session.commit()
@@ -223,6 +267,8 @@ async def upload_media(
         mediaId=record.media_id,
         downloadUrl=download_url,
         expiresIn=settings.presigned_download_ttl_sec,
+        publicUrl=build_public_url(record.public_token) if record.is_public and record.public_token else None,
+        publicExpiresAt=record.public_expires_at.isoformat() if record.public_expires_at else None,
     )
 
 
@@ -247,6 +293,62 @@ def get_download_url(
     return DownloadUrlResponse(downloadUrl=download_url, expiresIn=settings.presigned_download_ttl_sec)
 
 
+@app.get("/public/media/{token}")
+def get_public_media(token: str, session: Session = Depends(get_session), storage: StorageClient = Depends(get_storage_client)):
+    record = session.exec(select(MediaRecord).where(MediaRecord.public_token == token)).first()
+    if not record or record.deleted_at is not None or record.status != "ready":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media not found")
+    now = utcnow()
+    public_expires_at = normalize_datetime(record.public_expires_at)
+    if not record.is_public or record.public_revoked_at is not None or not public_expires_at or public_expires_at <= now:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media not found")
+    obj = storage.get_object(record.bucket, record.object_key)
+    audit(
+        "public-download",
+        userId=record.user_id,
+        mediaId=record.media_id,
+        bucket=record.bucket,
+        size=record.size,
+        status="issued",
+    )
+    headers = {
+        "Content-Disposition": f'inline; filename="{record.filename}"',
+        "Cache-Control": "private, max-age=60",
+    }
+    return StreamingResponse(
+        obj["Body"].iter_chunks(),
+        media_type=record.mime_type,
+        headers=headers,
+    )
+
+
+@app.post("/v1/media/{media_id}/revoke-public", response_model=ActionResponse, dependencies=[Depends(require_api_key)])
+def revoke_public_media(
+    media_id: str,
+    request: Request,
+    session: Session = Depends(get_session),
+) -> ActionResponse:
+    enforce_write_rate_limit(request)
+    record = session.get(MediaRecord, media_id)
+    if not record or record.deleted_at is not None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media not found")
+    record.is_public = False
+    record.public_token = None
+    record.public_revoked_at = utcnow()
+    record.updated_at = utcnow()
+    session.add(record)
+    session.commit()
+    audit(
+        "revoke-public-media",
+        userId=record.user_id,
+        mediaId=record.media_id,
+        bucket=record.bucket,
+        size=record.size,
+        status=record.status,
+    )
+    return ActionResponse(ok=True)
+
+
 @app.delete("/v1/media/{media_id}", response_model=DeleteResponse, dependencies=[Depends(require_api_key)])
 def delete_media(
     media_id: str,
@@ -262,6 +364,9 @@ def delete_media(
     record.status = "deleted"
     record.deleted_at = datetime.now(timezone.utc)
     record.updated_at = datetime.now(timezone.utc)
+    record.is_public = False
+    record.public_token = None
+    record.public_revoked_at = datetime.now(timezone.utc)
     session.add(record)
     session.commit()
     audit(
