@@ -1,0 +1,13 @@
+.env
+.env.*
+!.env.example
+__pycache__/
+*.pyc
+.pytest_cache/
+.tmp/
+data/
+.agents/
+.codex/
+opencode.json
+skills-lock.json
+test-media.db
