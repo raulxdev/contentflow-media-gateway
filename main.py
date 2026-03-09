@@ -1,8 +1,9 @@
 import logging
+import mimetypes
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile, status
 from sqlmodel import Session, select
 
 from app.config import get_settings
@@ -16,6 +17,7 @@ from app.schemas import (
     DownloadUrlResponse,
     InitUploadRequest,
     InitUploadResponse,
+    UploadResponse,
 )
 from app.security import require_api_key
 from app.storage import StorageClient, get_storage_client
@@ -57,9 +59,29 @@ def validate_upload_request(payload: InitUploadRequest | CompleteUploadRequest) 
     normalize_bucket(payload.bucket)
 
 
+def validate_upload_metadata(filename: str, mime_type: str, size: int, bucket: str) -> None:
+    payload = InitUploadRequest(
+        filename=filename,
+        mimeType=mime_type,
+        size=size,
+        userId="validation-only",
+        bucket=bucket,
+    )
+    validate_upload_request(payload)
+
+
 def audit(event: str, **fields: str | int | None) -> None:
     payload = {"event": event, **fields, "timestamp": datetime.now(timezone.utc).isoformat()}
     logger.info(payload)
+
+
+def infer_mime_type(upload: UploadFile) -> str:
+    if upload.content_type:
+        return upload.content_type.strip().lower()
+    guessed, _ = mimetypes.guess_type(upload.filename or "")
+    if guessed:
+        return guessed.lower()
+    return "application/octet-stream"
 
 
 @app.post("/v1/media/init-upload", response_model=InitUploadResponse, dependencies=[Depends(require_api_key)])
@@ -135,6 +157,61 @@ def complete_upload(
         status=record.status,
     )
     return CompleteUploadResponse(mediaId=record.media_id)
+
+
+@app.post("/v1/media/upload", response_model=UploadResponse, dependencies=[Depends(require_api_key)])
+async def upload_media(
+    request: Request,
+    userId: str = Form(..., min_length=1, max_length=128),
+    bucket: str = Form(..., min_length=1, max_length=64),
+    file: UploadFile = File(...),
+    session: Session = Depends(get_session),
+    storage: StorageClient = Depends(get_storage_client),
+) -> UploadResponse:
+    enforce_write_rate_limit(request)
+    if not file.filename:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Filename is required")
+
+    mime_type = infer_mime_type(file)
+    bucket = normalize_bucket(bucket.strip())
+    userId = userId.strip()
+    body = await file.read()
+    size = len(body)
+    validate_upload_metadata(file.filename, mime_type, size, bucket)
+
+    object_key = storage.build_object_key(userId, file.filename)
+    try:
+        storage.upload_object(bucket, object_key, body, mime_type)
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Upload to storage failed") from exc
+
+    record = MediaRecord(
+        user_id=userId,
+        bucket=bucket,
+        object_key=object_key,
+        filename=file.filename,
+        mime_type=mime_type,
+        size=size,
+        status="ready",
+    )
+    session.add(record)
+    session.commit()
+    session.refresh(record)
+
+    download_url = storage.generate_download_url(record.bucket, record.object_key)
+    audit(
+        "upload-media",
+        userId=record.user_id,
+        mediaId=record.media_id,
+        bucket=record.bucket,
+        size=record.size,
+        status=record.status,
+    )
+    return UploadResponse(
+        mediaId=record.media_id,
+        downloadUrl=download_url,
+        expiresIn=settings.presigned_download_ttl_sec,
+    )
 
 
 @app.get("/v1/media/{media_id}/download-url", response_model=DownloadUrlResponse)

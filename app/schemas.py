@@ -37,6 +37,11 @@ class DownloadUrlResponse(BaseModel):
     expiresIn: int
 
 
+class UploadResponse(BaseModel):
+    mediaId: str
+    downloadUrl: str
+    expiresIn: int
+
+
 class DeleteResponse(BaseModel):
     ok: bool
-

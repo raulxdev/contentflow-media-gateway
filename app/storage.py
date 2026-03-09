@@ -55,6 +55,9 @@ class StorageClient:
     def delete_object(self, bucket: str, object_key: str) -> None:
         self._client.delete_object(Bucket=bucket, Key=object_key)
 
+    def upload_object(self, bucket: str, object_key: str, body: bytes, mime_type: str) -> None:
+        self._client.put_object(Bucket=bucket, Key=object_key, Body=body, ContentType=mime_type)
+
     def _rewrite_endpoint(self, url: str) -> str:
         if not self.settings.s3_public_endpoint:
             return url

@@ -5,8 +5,7 @@ Servicio interno para gestionar uploads y descargas firmadas sobre almacenamient
 ## Endpoints
 
 - `GET /health`
-- `POST /v1/media/init-upload`
-- `POST /v1/media/complete`
+- `POST /v1/media/upload`
 - `GET /v1/media/{media_id}/download-url`
 - `DELETE /v1/media/{media_id}`
 
@@ -19,3 +18,7 @@ Servicio interno para gestionar uploads y descargas firmadas sobre almacenamient
 ## Variables
 
 Ver `.env.example`.
+
+## Operacion desde n8n
+
+Ver [N8N_CURL_EXAMPLES.md](/c:/Users/kevin/Documents/minio%20coolify/directives/N8N_CURL_EXAMPLES.md) para el flujo completo con `curl` importable en nodos `HTTP Request`.
