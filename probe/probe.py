@@ -37,6 +37,17 @@ def main() -> int:
             data=payload,
             timeout=120,
         )
+        if upload.status_code >= 400:
+            raise RuntimeError(
+                json.dumps(
+                    {
+                        "upload_status": upload.status_code,
+                        "upload_headers": dict(upload.headers),
+                        "upload_body": upload.text[:1000],
+                        "upload_url": init_payload["uploadUrl"],
+                    }
+                )
+            )
         upload.raise_for_status()
 
         complete = requests.post(
