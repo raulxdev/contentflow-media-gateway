@@ -201,9 +201,15 @@ def run_bucket_bootstrap_probe() -> int:
                 ]
             },
         )
+        anonymous_check = requests.get(
+            f"{os.getenv('S3_ENDPOINT', 'http://minio:9000').rstrip('/')}/{os.getenv('S3_BUCKET_USER_VIDEOS', 'user-videos')}?list-type=2",
+            timeout=30,
+        )
         result = {
             "buckets": [bucket["Name"] for bucket in client.list_buckets()["Buckets"]],
             "lifecycle_applied_to": os.getenv("S3_BUCKET_TMP_UPLOADS", "tmp-uploads"),
+            "anonymous_status": anonymous_check.status_code,
+            "anonymous_body": anonymous_check.text[:300],
         }
         print(json.dumps(result))
         sys.stdout.flush()
