@@ -4,11 +4,13 @@ import os
 import sys
 import time
 import traceback
+from pathlib import Path
+from shutil import disk_usage
 
 import requests
 
 
-def main() -> int:
+def run_media_probe() -> int:
     try:
         base = os.getenv("MEDIA_GATEWAY_BASE_URL", "http://media-gateway:8000")
         headers = {
@@ -100,6 +102,40 @@ def main() -> int:
         sys.stdout.flush()
         time.sleep(300)
         return 1
+
+
+def run_disk_probe() -> int:
+    try:
+        target = Path(os.getenv("DISK_CHECK_PATH", "/hostroot"))
+        usage = disk_usage(target)
+        result = {
+            "path": str(target),
+            "total_gb": round(usage.total / (1024**3), 2),
+            "used_gb": round(usage.used / (1024**3), 2),
+            "free_gb": round(usage.free / (1024**3), 2),
+        }
+        print(json.dumps(result))
+        sys.stdout.flush()
+        time.sleep(300)
+        return 0
+    except Exception as exc:
+        print(
+            json.dumps(
+                {
+                    "error": str(exc),
+                    "traceback": traceback.format_exc(),
+                }
+            )
+        )
+        sys.stdout.flush()
+        time.sleep(300)
+        return 1
+
+
+def main() -> int:
+    if os.getenv("PROBE_MODE") == "disk-check":
+        return run_disk_probe()
+    return run_media_probe()
 
 
 if __name__ == "__main__":
