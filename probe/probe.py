@@ -106,6 +106,48 @@ def run_media_probe() -> int:
         return 1
 
 
+def run_single_step_upload_probe() -> int:
+    try:
+        base = os.getenv("MEDIA_GATEWAY_BASE_URL", "http://media-gateway:8000")
+        api_key = os.environ["MEDIA_GATEWAY_API_KEY"]
+        payload = b"probe-video-payload"
+        upload = requests.post(
+            f"{base}/v1/media/upload",
+            headers={"X-API-Key": api_key},
+            data={"userId": "probe-user", "bucket": "user-videos"},
+            files={"file": ("probe.mp4", payload, "video/mp4")},
+            timeout=120,
+        )
+        upload.raise_for_status()
+        upload_payload = upload.json()
+        download = requests.get(upload_payload["downloadUrl"], timeout=120)
+        download.raise_for_status()
+        result = {
+            "health": requests.get(f"{base}/health", timeout=30).json(),
+            "upload_status": upload.status_code,
+            "download_status": download.status_code,
+            "media_id": upload_payload["mediaId"],
+            "download_url": upload_payload["downloadUrl"],
+            "sha256": hashlib.sha256(download.content).hexdigest(),
+        }
+        print(json.dumps(result))
+        sys.stdout.flush()
+        time.sleep(300)
+        return 0
+    except Exception as exc:
+        print(
+            json.dumps(
+                {
+                    "error": str(exc),
+                    "traceback": traceback.format_exc(),
+                }
+            )
+        )
+        sys.stdout.flush()
+        time.sleep(300)
+        return 1
+
+
 def run_disk_probe() -> int:
     try:
         target = Path(os.getenv("DISK_CHECK_PATH", "/hostroot"))
@@ -235,6 +277,8 @@ def main() -> int:
         return run_disk_probe()
     if mode == "bucket-bootstrap":
         return run_bucket_bootstrap_probe()
+    if mode == "single-step-upload":
+        return run_single_step_upload_probe()
     if mode == "download-check":
         return run_download_check_probe()
     return run_media_probe()

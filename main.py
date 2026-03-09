@@ -183,6 +183,18 @@ async def upload_media(
     try:
         storage.upload_object(bucket, object_key, body, mime_type)
     except Exception as exc:
+        logger.exception(
+            {
+                "event": "upload-media-storage-error",
+                "userId": userId,
+                "bucket": bucket,
+                "objectKey": object_key,
+                "size": size,
+                "errorType": type(exc).__name__,
+                "errorMessage": str(exc),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        )
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Upload to storage failed") from exc
 
     record = MediaRecord(
