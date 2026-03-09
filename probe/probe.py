@@ -235,10 +235,10 @@ def run_bucket_bootstrap_probe() -> int:
             LifecycleConfiguration={
                 "Rules": [
                     {
-                        "ID": "expire-tmp-uploads-7d",
+                        "ID": "expire-tmp-uploads-3d",
                         "Status": "Enabled",
                         "Filter": {"Prefix": ""},
-                        "Expiration": {"Days": 7},
+                        "Expiration": {"Days": 3},
                     }
                 ]
             },
@@ -250,6 +250,7 @@ def run_bucket_bootstrap_probe() -> int:
         result = {
             "buckets": [bucket["Name"] for bucket in client.list_buckets()["Buckets"]],
             "lifecycle_applied_to": os.getenv("S3_BUCKET_TMP_UPLOADS", "tmp-uploads"),
+            "lifecycle_days": 3,
             "anonymous_status": anonymous_check.status_code,
             "anonymous_body": anonymous_check.text[:300],
         }

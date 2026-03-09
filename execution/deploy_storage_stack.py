@@ -224,10 +224,10 @@ def main() -> None:
     lifecycle = {
         "Rules": [
             {
-                "ID": "expire-tmp-uploads-7d",
+                "ID": "expire-tmp-uploads-3d",
                 "Status": "Enabled",
                 "Filter": {"Prefix": ""},
-                "Expiration": {"Days": 7},
+                "Expiration": {"Days": 3},
             }
         ]
     }
