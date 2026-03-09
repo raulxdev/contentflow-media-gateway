@@ -127,6 +127,10 @@ Ver `.env.example`.
 
 Ver [N8N_CURL_EXAMPLES.md](/c:/Users/kevin/Documents/minio%20coolify/directives/N8N_CURL_EXAMPLES.md) para el flujo completo con `curl` importable en nodos `HTTP Request`.
 
+## Distribucion
+
+Si otra persona quiere instalar esta solucion en su propio Coolify, comparte tambien [COMMUNITY_INSTALL.md](/c:/Users/kevin/Documents/minio%20coolify/directives/COMMUNITY_INSTALL.md).
+
 ## Advertencia
 
 El sistema esta funcionando para pruebas internas, pero la persistencia robusta en Coolify sigue siendo un punto pendiente antes de tratarlo como almacenamiento de produccion.
