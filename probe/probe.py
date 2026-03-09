@@ -132,9 +132,48 @@ def run_disk_probe() -> int:
         return 1
 
 
+def run_download_check_probe() -> int:
+    try:
+        base = os.getenv("MEDIA_GATEWAY_BASE_URL", "http://media-gateway:8000")
+        media_id = os.environ["MEDIA_ID"]
+        expected_sha256 = os.environ["EXPECTED_SHA256"]
+        download_info = requests.get(f"{base}/v1/media/{media_id}/download-url", timeout=60)
+        download_info.raise_for_status()
+        download_url = download_info.json()["downloadUrl"]
+        download = requests.get(download_url, timeout=120)
+        download.raise_for_status()
+        actual_sha256 = hashlib.sha256(download.content).hexdigest()
+        result = {
+            "media_id": media_id,
+            "download_url_status": download_info.status_code,
+            "download_status": download.status_code,
+            "sha256": actual_sha256,
+            "matches_expected": actual_sha256 == expected_sha256,
+        }
+        print(json.dumps(result))
+        sys.stdout.flush()
+        time.sleep(300)
+        return 0 if result["matches_expected"] else 1
+    except Exception as exc:
+        print(
+            json.dumps(
+                {
+                    "error": str(exc),
+                    "traceback": traceback.format_exc(),
+                }
+            )
+        )
+        sys.stdout.flush()
+        time.sleep(300)
+        return 1
+
+
 def main() -> int:
-    if os.getenv("PROBE_MODE") == "disk-check":
+    mode = os.getenv("PROBE_MODE")
+    if mode == "disk-check":
         return run_disk_probe()
+    if mode == "download-check":
+        return run_download_check_probe()
     return run_media_probe()
 
 
