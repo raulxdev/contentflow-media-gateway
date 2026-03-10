@@ -94,7 +94,7 @@ entonces la respuesta incluira:
 
 La `publicUrl` si se puede compartir externamente y sera servida por:
 
-- `https://media-share.aishiagency.tech/public/media/{token}`
+- `https://media-share.example.com/public/media/{token}`
 
 El gateway validara el token y entregara el archivo desde el endpoint publico.
 
@@ -160,7 +160,7 @@ curl --request POST 'http://media-gateway:8000/v1/media/upload' \
   "mediaId": "REPLACE_WITH_MEDIA_ID",
   "downloadUrl": "http://minio:9000/...",
   "expiresIn": 900,
-  "publicUrl": "https://media-share.aishiagency.tech/public/media/...",
+  "publicUrl": "https://media-share.example.com/public/media/...",
   "publicExpiresAt": "2026-03-09T22:00:00+00:00"
 }
 ```

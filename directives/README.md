@@ -88,7 +88,7 @@ Cuando un upload se hace con publicacion activa:
 
 - la respuesta incluye `publicUrl`
 - esa URL si es compartible externamente
-- usa el dominio publico `media-share.aishiagency.tech`
+- usa el dominio publico configurado en `PUBLIC_BASE_URL`, por ejemplo `media-share.example.com`
 - el gateway valida el token y sirve el archivo desde el endpoint publico
 
 Reglas:

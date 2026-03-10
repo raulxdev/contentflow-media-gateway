@@ -19,7 +19,7 @@ def setup_module() -> None:
     os.environ["S3_ACCESS_KEY_ID"] = "access"
     os.environ["S3_SECRET_ACCESS_KEY"] = "secret"
     os.environ["DATABASE_URL"] = f"sqlite:///{TEST_DB_PATH.as_posix()}"
-    os.environ["PUBLIC_BASE_URL"] = "https://media-share.aishiagency.tech"
+    os.environ["PUBLIC_BASE_URL"] = "https://media-share.example.com"
 
 
 class FakeStorage:
