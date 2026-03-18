@@ -58,8 +58,14 @@ class StorageClient:
     def upload_object(self, bucket: str, object_key: str, body: bytes, mime_type: str) -> None:
         self._client.put_object(Bucket=bucket, Key=object_key, Body=body, ContentType=mime_type)
 
-    def get_object(self, bucket: str, object_key: str):
-        return self._client.get_object(Bucket=bucket, Key=object_key)
+    def head_object(self, bucket: str, object_key: str):
+        return self._client.head_object(Bucket=bucket, Key=object_key)
+
+    def get_object(self, bucket: str, object_key: str, byte_range: str | None = None):
+        params = {"Bucket": bucket, "Key": object_key}
+        if byte_range:
+            params["Range"] = byte_range
+        return self._client.get_object(**params)
 
     def _rewrite_endpoint(self, url: str) -> str:
         if not self.settings.s3_public_endpoint:

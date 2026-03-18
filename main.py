@@ -3,9 +3,10 @@ import mimetypes
 import secrets
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from sqlmodel import Session, select
 
 from app.config import get_settings
@@ -103,6 +104,56 @@ def normalize_datetime(value: datetime | None) -> datetime | None:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
+
+
+def parse_range_header(range_header: str, total_size: int) -> tuple[int, int]:
+    if not range_header.startswith("bytes="):
+        raise HTTPException(status_code=status.HTTP_416_REQUESTED_RANGE_NOT_SATISFIABLE, detail="Invalid range unit")
+    raw = range_header[6:].strip()
+    if "," in raw:
+        raise HTTPException(status_code=status.HTTP_416_REQUESTED_RANGE_NOT_SATISFIABLE, detail="Multiple ranges are not supported")
+    if "-" not in raw:
+        raise HTTPException(status_code=status.HTTP_416_REQUESTED_RANGE_NOT_SATISFIABLE, detail="Invalid range format")
+
+    start_raw, end_raw = raw.split("-", 1)
+    if start_raw == "":
+        try:
+            suffix_length = int(end_raw)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_416_REQUESTED_RANGE_NOT_SATISFIABLE, detail="Invalid range format") from exc
+        if suffix_length <= 0:
+            raise HTTPException(status_code=status.HTTP_416_REQUESTED_RANGE_NOT_SATISFIABLE, detail="Invalid range format")
+        start = max(total_size - suffix_length, 0)
+        end = total_size - 1
+        return start, end
+
+    try:
+        start = int(start_raw)
+        end = int(end_raw) if end_raw else total_size - 1
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_416_REQUESTED_RANGE_NOT_SATISFIABLE, detail="Invalid range format") from exc
+
+    if start < 0 or end < start or start >= total_size:
+        raise HTTPException(status_code=status.HTTP_416_REQUESTED_RANGE_NOT_SATISFIABLE, detail="Range not satisfiable")
+    end = min(end, total_size - 1)
+    return start, end
+
+
+def public_media_headers(filename: str, media_type: str, size: int) -> dict[str, str]:
+    return {
+        "Content-Disposition": f'inline; filename="{filename}"',
+        "Cache-Control": "private, max-age=60",
+        "Accept-Ranges": "bytes",
+        "Content-Type": media_type,
+        "Content-Length": str(size),
+    }
+
+
+def public_media_metadata(record: MediaRecord, storage: StorageClient) -> dict[str, Any]:
+    metadata = storage.head_object(record.bucket, record.object_key)
+    content_type = metadata.get("ContentType") or record.mime_type
+    content_length = int(metadata["ContentLength"])
+    return {"content_type": content_type, "content_length": content_length}
 
 
 def parse_public_ttl(public_ttl_sec: int | None) -> int:
@@ -293,8 +344,13 @@ def get_download_url(
     return DownloadUrlResponse(downloadUrl=download_url, expiresIn=settings.presigned_download_ttl_sec)
 
 
-@app.get("/public/media/{token}")
-def get_public_media(token: str, session: Session = Depends(get_session), storage: StorageClient = Depends(get_storage_client)):
+@app.api_route("/public/media/{token}", methods=["GET", "HEAD"])
+def get_public_media(
+    token: str,
+    request: Request,
+    session: Session = Depends(get_session),
+    storage: StorageClient = Depends(get_storage_client),
+):
     record = session.exec(select(MediaRecord).where(MediaRecord.public_token == token)).first()
     if not record or record.deleted_at is not None or record.status != "ready":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media not found")
@@ -302,7 +358,7 @@ def get_public_media(token: str, session: Session = Depends(get_session), storag
     public_expires_at = normalize_datetime(record.public_expires_at)
     if not record.is_public or record.public_revoked_at is not None or not public_expires_at or public_expires_at <= now:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media not found")
-    obj = storage.get_object(record.bucket, record.object_key)
+    metadata = public_media_metadata(record, storage)
     audit(
         "public-download",
         userId=record.user_id,
@@ -311,13 +367,25 @@ def get_public_media(token: str, session: Session = Depends(get_session), storag
         size=record.size,
         status="issued",
     )
-    headers = {
-        "Content-Disposition": f'inline; filename="{record.filename}"',
-        "Cache-Control": "private, max-age=60",
-    }
+    headers = public_media_headers(record.filename, metadata["content_type"], metadata["content_length"])
+    if request.method == "HEAD":
+        return Response(status_code=status.HTTP_200_OK, headers=headers, media_type=metadata["content_type"])
+
+    range_header = request.headers.get("range")
+    status_code = status.HTTP_200_OK
+    byte_range = None
+    if range_header:
+        start, end = parse_range_header(range_header, metadata["content_length"])
+        byte_range = f"bytes={start}-{end}"
+        headers["Content-Range"] = f"bytes {start}-{end}/{metadata['content_length']}"
+        headers["Content-Length"] = str(end - start + 1)
+        status_code = status.HTTP_206_PARTIAL_CONTENT
+
+    obj = storage.get_object(record.bucket, record.object_key, byte_range=byte_range)
     return StreamingResponse(
         obj["Body"].iter_chunks(),
-        media_type=record.mime_type,
+        status_code=status_code,
+        media_type=metadata["content_type"],
         headers=headers,
     )
 

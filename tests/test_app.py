@@ -27,6 +27,7 @@ class FakeStorage:
         self.deleted = []
         self.uploaded = []
         self.objects = {}
+        self.ranges = []
 
     def build_object_key(self, user_id: str, filename: str) -> str:
         return f"{user_id}/{uuid4().hex}{Path(filename).suffix}"
@@ -45,10 +46,26 @@ class FakeStorage:
 
     def upload_object(self, bucket: str, object_key: str, body: bytes, mime_type: str) -> None:
         self.uploaded.append((bucket, object_key, body, mime_type))
-        self.objects[(bucket, object_key)] = {"Body": FakeBody(body)}
+        self.objects[(bucket, object_key)] = {
+            "Body": FakeBody(body),
+            "ContentLength": len(body),
+            "ContentType": mime_type,
+        }
 
-    def get_object(self, bucket: str, object_key: str):
-        return self.objects[(bucket, object_key)]
+    def head_object(self, bucket: str, object_key: str):
+        obj = self.objects[(bucket, object_key)]
+        return {"ContentLength": obj["ContentLength"], "ContentType": obj["ContentType"]}
+
+    def get_object(self, bucket: str, object_key: str, byte_range: str | None = None):
+        obj = self.objects[(bucket, object_key)]
+        body = obj["Body"].payload
+        if byte_range:
+            self.ranges.append((bucket, object_key, byte_range))
+            start_raw, end_raw = byte_range.removeprefix("bytes=").split("-", 1)
+            start = int(start_raw)
+            end = int(end_raw)
+            body = body[start : end + 1]
+        return {"Body": FakeBody(body), "ContentLength": len(body), "ContentType": obj["ContentType"]}
 
 
 class FakeBody:
@@ -115,6 +132,21 @@ def test_public_upload_returns_public_url_and_redirects():
         assert public_get.status_code == 200
         assert public_get.content == b"video-bytes"
         assert public_get.headers["content-type"].startswith("video/mp4")
+        assert public_get.headers["accept-ranges"] == "bytes"
+        assert public_get.headers["content-length"] == str(len(b"video-bytes"))
+
+        public_head = client.head(f"/public/media/{token}")
+        assert public_head.status_code == 200
+        assert public_head.headers["content-type"].startswith("video/mp4")
+        assert public_head.headers["accept-ranges"] == "bytes"
+        assert public_head.headers["content-length"] == str(len(b"video-bytes"))
+
+        partial = client.get(f"/public/media/{token}", headers={"Range": "bytes=0-4"})
+        assert partial.status_code == 206
+        assert partial.content == b"video"
+        assert partial.headers["content-range"] == "bytes 0-4/11"
+        assert partial.headers["content-length"] == "5"
+        assert fake.ranges == [("user-videos", fake.uploaded[0][1], "bytes=0-4")]
 
 
 def test_public_upload_rejects_tmp_uploads_bucket():
